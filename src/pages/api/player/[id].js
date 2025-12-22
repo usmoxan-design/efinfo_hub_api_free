@@ -1,11 +1,10 @@
-// ✅ TO'G'RI import
 import axios from 'axios';
-import * as cheerio from 'cheerio';  // ← Bu muhim!
+import * as cheerio from 'cheerio';  // ← MUHIM: import * as
 
 const BASE_URL = 'https://pesdb.net/efootball/';
 
 export default async function handler(req, res) {
-  // Headers qo'shish
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -20,7 +19,7 @@ export default async function handler(req, res) {
     let url = `${BASE_URL}?id=${id}`;
     if (mode === 'max_level') url += '&mode=max_level';
 
-    console.log('Fetching URL:', url);
+    console.log('📍 Backend: Fetching', url);
 
     const { data } = await axios.get(url, {
       headers: { 
@@ -29,20 +28,25 @@ export default async function handler(req, res) {
       timeout: 15000,
     });
 
-    const $ = cheerio.load(data);  // ← Bu yerda 'load' metodi ishlatiladi
+    const $ = cheerio.load(data);
 
     let position = 'Unknown',
       height = 'Unknown',
       age = 'Unknown',
       foot = 'Unknown',
       playingStyle = 'Unknown',
-      description = '';
+      description = '',
+      teamName = '',
+      league = '',
+      nationality = '',
+      region = '';
 
     const stats = {};
     const info = {};
     const skills = [];
     const suggestedPoints = {};
 
+    // Parse table rows
     $('tr').each((_, row) => {
       const th = $(row).find('th').text().trim().replace(':', '');
       const td = $(row).find('td');
@@ -55,13 +59,24 @@ export default async function handler(req, res) {
       else if (key === 'height') height = tdText;
       else if (key === 'age') age = tdText;
       else if (key === 'foot') foot = tdText;
-      else if (key === 'playing styles') playingStyle = tdText;
+      else if (key === 'team name') teamName = tdText;
+      else if (key === 'league') league = tdText;
+      else if (key === 'nationality') nationality = tdText;
+      else if (key === 'region') region = tdText;
+      else if (key === 'playing styles') {
+        playingStyle = tdText;
+        console.log('✅ Backend: Found Playing Style:', playingStyle);
+      }
       else if (key === 'player skills') {
-        // ✅ FIXED: Properly handle <br> tags
+        // ✅ Properly handle <br> tags
         const tdHtml = td.html() || '';
+        console.log('📍 Backend: Raw skills HTML:', tdHtml.substring(0, 200));
+        
         const skillsText = tdHtml.replace(/<br\s*\/?>/gi, '\n');
         const $temp = cheerio.load(skillsText);
         const cleanText = $temp.text().trim();
+        
+        console.log('📍 Backend: Clean skills text:', cleanText);
         
         cleanText.split('\n').forEach(s => {
           const trimmed = s.trim();
@@ -69,6 +84,8 @@ export default async function handler(req, res) {
             skills.push(trimmed);
           }
         });
+        
+        console.log('✅ Backend: Parsed skills:', skills);
       }
       else if (/\d/.test(tdText)) stats[th] = tdText;
       else info[th] = tdText;
@@ -95,7 +112,8 @@ export default async function handler(req, res) {
     const bottom = $('.bottom-description h2').first();
     if (bottom.length) description = bottom.text().trim();
 
-    console.log('Parsed skills:', skills);
+    console.log('✅ Backend: Final skills count:', skills.length);
+    console.log('✅ Backend: Playing Style:', playingStyle);
 
     res.status(200).json({
       id,
@@ -103,6 +121,11 @@ export default async function handler(req, res) {
       height,
       age,
       foot,
+      teamName,
+      team_name: teamName,
+      league,
+      nationality,
+      region,
       playingStyle,
       playing_style: playingStyle,
       stats,
@@ -114,7 +137,7 @@ export default async function handler(req, res) {
       description,
     });
   } catch (err) {
-    console.error('Error in player detail API:', err);
+    console.error('❌ Backend Error:', err);
     res.status(500).json({ error: err.message, stack: err.stack });
   }
 }
