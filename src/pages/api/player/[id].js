@@ -1,9 +1,18 @@
+// ✅ TO'G'RI import
 import axios from 'axios';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';  // ← Bu muhim!
 
 const BASE_URL = 'https://pesdb.net/efootball/';
 
 export default async function handler(req, res) {
+  // Headers qo'shish
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
+
   try {
     const { id } = req.query;
     const { mode } = req.query;
@@ -11,13 +20,16 @@ export default async function handler(req, res) {
     let url = `${BASE_URL}?id=${id}`;
     if (mode === 'max_level') url += '&mode=max_level';
 
+    console.log('Fetching URL:', url);
+
     const { data } = await axios.get(url, {
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
+      timeout: 15000,
     });
 
-    const $ = cheerio.load(data);
+    const $ = cheerio.load(data);  // ← Bu yerda 'load' metodi ishlatiladi
 
     let position = 'Unknown',
       height = 'Unknown',
@@ -83,6 +95,8 @@ export default async function handler(req, res) {
     const bottom = $('.bottom-description h2').first();
     if (bottom.length) description = bottom.text().trim();
 
+    console.log('Parsed skills:', skills);
+
     res.status(200).json({
       id,
       position,
@@ -90,17 +104,17 @@ export default async function handler(req, res) {
       age,
       foot,
       playingStyle,
-      playing_style: playingStyle, // Alias for compatibility
+      playing_style: playingStyle,
       stats,
       info,
       skills,
-      player_skills: skills, // Alias for compatibility
+      player_skills: skills,
       suggestedPoints,
-      suggested_points: suggestedPoints, // Alias for compatibility
+      suggested_points: suggestedPoints,
       description,
     });
   } catch (err) {
     console.error('Error in player detail API:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 }
