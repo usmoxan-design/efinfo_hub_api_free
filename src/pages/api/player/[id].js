@@ -1,120 +1,106 @@
-// pages/api/player/[id].js
-
 import axios from 'axios';
-import * as cheerio from 'cheerio';
+import cheerio from 'cheerio';
 
-const setHeaders = (res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json');
-};
+const BASE_URL = 'https://pesdb.net/efootball/';
 
 export default async function handler(req, res) {
-  setHeaders(res);
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
-
-  // 1. Dinamik route'dan 'id'ni olish
-  const { id } = req.query; 
-  // 2. Query'dan 'mode'ni olish (max_level yoki level1)
-  const { mode = 'level1' } = req.query;
-
-  if (!id) {
-    return res.status(400).json({ error: 'Player ID is required' });
-  }
-
-  // 'mode' parametriga qarab URL'ni sozlash
-  let url = `https://pesdb.net/efootball/?id=${id}`;
-  if (mode === 'max_level') {
-    url += '&mode=max_level';
-  }
-
   try {
-    const { data: html } = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    const { id } = req.query;
+    const { mode } = req.query;
+
+    let url = `${BASE_URL}?id=${id}`;
+    if (mode === 'max_level') url += '&mode=max_level';
+
+    const { data } = await axios.get(url, {
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      timeout: 15000,
     });
 
-    const $ = cheerio.load(html);
-    const details = {
-      id: id,
-      position: 'Unknown',
-      height: 'Unknown',
-      age: 'Unknown',
-      foot: 'Unknown',
-      playingStyle: 'Unknown',
-      stats: {},
-      skills: [],
-      info: {},
-      suggestedPoints: {},
-      description: '',
-    };
+    const $ = cheerio.load(data);
 
-    // 1. Barcha jadval qatorlaridan umumiy ma'lumot va stat'larni olish
-    $('tr').each((i, row) => {
-        const th = $(row).find('th').first();
-        const td = $(row).find('td').first();
+    let position = 'Unknown',
+      height = 'Unknown',
+      age = 'Unknown',
+      foot = 'Unknown',
+      playingStyle = 'Unknown',
+      description = '';
 
-        if (th.length === 0 || td.length === 0) return;
+    const stats = {};
+    const info = {};
+    const skills = [];
+    const suggestedPoints = {};
 
-        const originalHeader = th.text().trim().replace(/:$/, '').trim();
-        const header = originalHeader.toLowerCase();
-        let value = td.text().trim();
+    $('tr').each((_, row) => {
+      const th = $(row).find('th').text().trim().replace(':', '');
+      const td = $(row).find('td');
+      const tdText = td.text().trim();
+      if (!th || !tdText) return;
 
-        if (header === 'position') details.position = value;
-        else if (header === 'height') details.height = value;
-        else if (header === 'age') details.age = value;
-        else if (header === 'foot') details.foot = value;
-        else if (header === 'playing styles') details.playingStyle = value;
-        else if (header === 'player skills') {
-            details.skills = value
-                .split('\n')
-                .map(s => s.trim())
-                .filter(s => s.length > 0);
-        } else {
-            // Stat'lar raqamdan iborat bo'lsa 'stats'ga, aks holda 'info'ga qo'shamiz
-            if (/\d/.test(value)) {
-                details.stats[originalHeader] = value;
-            } else {
-                details.info[originalHeader] = value;
+      const key = th.toLowerCase();
+      
+      if (key === 'position') position = tdText;
+      else if (key === 'height') height = tdText;
+      else if (key === 'age') age = tdText;
+      else if (key === 'foot') foot = tdText;
+      else if (key === 'playing styles') playingStyle = tdText;
+      else if (key === 'player skills') {
+        // ✅ FIXED: Properly handle <br> tags
+        const tdHtml = td.html() || '';
+        const skillsText = tdHtml.replace(/<br\s*\/?>/gi, '\n');
+        const $temp = cheerio.load(skillsText);
+        const cleanText = $temp.text().trim();
+        
+        cleanText.split('\n').forEach(s => {
+          const trimmed = s.trim();
+          if (trimmed && !trimmed.includes('<')) {
+            skills.push(trimmed);
+          }
+        });
+      }
+      else if (/\d/.test(tdText)) stats[th] = tdText;
+      else info[th] = tdText;
+    });
+
+    // Suggested points parsing
+    $('div').each((_, div) => {
+      const text = $(div).text();
+      if (text.includes('Suggested points') && text.length < 150) {
+        $(div).parent().find('div').each((_, d) => {
+          const childText = $(d).text();
+          if (childText.includes(':')) {
+            const parts = childText.split(':');
+            if (parts.length >= 2) {
+              const key = parts[0].replace(/[•\u2022]/g, '').trim();
+              const val = parseInt($(d).find('span').text());
+              if (key && !isNaN(val)) suggestedPoints[key] = val;
             }
-        }
+          }
+        });
+      }
     });
 
-    // 2. Tavsiya etilgan ballarni (suggested points) olish (murakkabroq scraping)
-    $('div').each((i, el) => {
-        const text = $(el).text().trim();
-        if (text.includes('Suggested points for Level')) {
-            // Parent elementni topish va bolalari bo'ylab yurish
-            $(el).parent().children().each((j, child) => {
-                if (child.tagName === 'div' && $(child).text().includes(':')) {
-                    const key = $(child).text().split(':')[0].replace(/•/g, '').trim();
-                    const valText = $(child).find('span').text().trim();
-                    const val = parseInt(valText, 10);
-                    if (!isNaN(val)) {
-                        details.suggestedPoints[key] = val;
-                    }
-                }
-            });
-            // Kerakli joyni topgandan so'ng tsiklni to'xtatish
-            return false; 
-        }
+    const bottom = $('.bottom-description h2').first();
+    if (bottom.length) description = bottom.text().trim();
+
+    res.status(200).json({
+      id,
+      position,
+      height,
+      age,
+      foot,
+      playingStyle,
+      playing_style: playingStyle, // Alias for compatibility
+      stats,
+      info,
+      skills,
+      player_skills: skills, // Alias for compatibility
+      suggestedPoints,
+      suggested_points: suggestedPoints, // Alias for compatibility
+      description,
     });
-
-    // 3. Pastki tavsifni olish
-    const descriptionEl = $('.bottom-description h2').first();
-    if (descriptionEl.length) {
-        details.description = descriptionEl.text().trim();
-    }
-    
-    // Natijani qaytarish
-    res.status(200).json(details);
-
-  } catch (error) {
-    console.error(`Scraping error for player ${id}:`, error);
-    res.status(500).json({ error: `Failed to fetch player details for ID ${id}`, details: error.message });
+  } catch (err) {
+    console.error('Error in player detail API:', err);
+    res.status(500).json({ error: err.message });
   }
 }
