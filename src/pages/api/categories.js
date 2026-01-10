@@ -28,18 +28,29 @@ export default async function handler(req, res) {
     $('div.shortcuts a').each((i, el) => {
       const name = $(el).text().trim();
       const href = $(el).attr('href');
-      
+
+      // Haqiqiy havola (href) mavjudligini tekshirish
       if (name && href) {
-        categories.push({
-          name: name,
-          // URL'ni to'liq manzilga aylantirish (agar nisbiy bo'lsa), URL konstruktoridan foydalanish yanada mustahkam.
-          url: href.startsWith('http') ? href : new URL(href, BASE_URL).toString()
-        });
+        categories.push({ name, href });
       }
     });
+
+    // Hech qanday kategoriya topilmasa ham 200 OK statusini qaytarish, lekin bo'sh massiv bilan
+    if (categories.length === 0) {
+      console.warn('No categories found for BASE_URL:', BASE_URL); // Vercel loglarida ko'rinadi
+      return res.status(200).json({ message: 'No categories found', categories: [] });
+    }
+
+    // Natijani qaytarish
     res.status(200).json(categories);
-  } catch (err) {
-    console.error("ERROR fetching categories:", err);
-    res.status(500).json({ error: "Failed to fetch categories", details: err.message });
+  } catch (error) {
+    console.error('Error fetching categories:', error); // Xatoning to'liq ma'lumotini logga yozish
+    // Vercel loglarida ko'rinadigan aniqroq xato xabarini qaytarish
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to fetch categories.',
+      details: error.message, // Xatoning xabarini klientga qaytarish (ishlab chiqarish muhitida ehtiyot bo'lish kerak)
+      // stack: process.env.NODE_ENV === 'development' ? error.stack : undefined // Faqat developmentda stackni ko'rsatish
+    });
   }
 }
