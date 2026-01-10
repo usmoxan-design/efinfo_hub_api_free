@@ -1,6 +1,7 @@
 // src/pages/api/player/[id].js
 const apicache = require('apicache');
-const { BASE_URL, fetchHtml } = require('./_utils');
+const { BASE_URL, fetchHtml } = require('../_utils'); // Yo'l o'zgartirildi
+
 
 let cache = apicache.middleware('5 minutes');
 
