@@ -1,149 +1,91 @@
-/* ==========================================================
-   BACKEND: pages/api/player/[id].js
-   ========================================================== */
-   import axios from 'axios';
-   import * as cheerio from 'cheerio'; // ✅ MUHIM: import * as
-   
-   const BASE_URL = 'https://pesdb.net/efootball/';
-   
-   export default async function handler(req, res) {
-     // CORS ta'minlash
-     res.setHeader('Access-Control-Allow-Origin', '*');
-     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-     
-     if (req.method === 'OPTIONS') return res.status(200).end();
-     if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
-   
-     try {
-       const { id, mode } = req.query;
-       let url = `${BASE_URL}?id=${id}`;
-       if (mode === 'max_level') url += '&mode=max_level';
-   
-       const { data: html } = await axios.get(url, {
-         headers: { 
-           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-           'Referer': 'https://pesdb.net/'
-         },
-         timeout: 10000,
-       });
-   
-       const $ = cheerio.load(html);
-   
-       // Initial state
-       const stats = {};
-       const info = {};
-       const skills = [];
-       const aiStyles = [];
-       const suggestedPoints = {};
-       
-       let position = 'Unknown',
-           height = 'Unknown',
-           age = 'Unknown',
-           foot = 'Unknown',
-           playingStyle = 'Unknown',
-           description = '',
-           teamName = 'Free Agent',
-           league = 'None',
-           nationality = 'Unknown',
-           region = 'Unknown';
-   
-       // 1. ASOSIY MA'LUMOTLAR VA STATLAR (table.player ichidan)
-       // Bu yerda stats, team name, league va h.k. olinadi
-       $('.player > tbody > tr:first-child td table tr').each((_, row) => {
-         const th = $(row).find('th').text().trim().replace(':', '');
-         const td = $(row).find('td');
-         if (!th || td.length === 0) return;
-   
-         // Stats uchun toza qiymatni olish (span ichidagi sondan foydalanamiz)
-         let value = td.text().trim();
-         if (td.find('span').length > 0) {
-           value = td.find('span').first().text().trim();
-         }
-   
-         const key = th.toLowerCase();
-         
-         // Categorization logic
-         if (key === 'position') position = value;
-         else if (key === 'height') height = value;
-         else if (key === 'age') age = value;
-         else if (key === 'foot') foot = value;
-         else if (key === 'team name') teamName = value;
-         else if (key === 'league') league = value;
-         else if (key === 'nationality') nationality = value;
-         else if (key === 'region') region = value;
-         else if (/\d/.test(value)) {
-           stats[th] = value;
-         } else {
-           info[th] = value;
-         }
-       });
-   
-       // 2. SKILLLAR VA PLAYING STYLE (table.playing_styles ichidan)
-       // Header va uning ostidagi itemlarni to'g'ri parse qilish
-       let currentSection = '';
-       $('.playing_styles tr').each((_, row) => {
-         const th = $(row).find('th').text().trim();
-         const td = $(row).find('td').text().trim();
-   
-         if (th) {
-           currentSection = th.toLowerCase();
-         } else if (td) {
-           if (currentSection.includes('playing style') && !currentSection.includes('ai')) {
-             playingStyle = td;
-           } else if (currentSection.includes('player skills')) {
-             skills.push(td);
-           } else if (currentSection.includes('ai playing styles')) {
-             aiStyles.push(td);
-           }
-         }
-       });
-   
-       // 3. SUGGESTED POINTS (Progression)
-       $('.player > tbody > tr:nth-child(2) td:first-child div').each((_, div) => {
-         const text = $(div).text();
-         if (text.includes('Suggested points')) {
-           $(div).find('div').each((_, d) => {
-             const line = $(d).text().trim();
-             if (line.includes(':')) {
-               const parts = line.split(':');
-               const pKey = parts[0].replace(/[•\u2022]/g, '').trim();
-               const pValStr = $(d).find('span').text().trim();
-               const pVal = parseInt(pValStr);
-               if (pKey && !isNaN(pVal)) suggestedPoints[pKey] = pVal;
-             }
-           });
-         }
-       });
-   
-       // 4. DESCRIPTION
-       const bottomDesc = $('.bottom-description h2').first();
-       if (bottomDesc.length) description = bottomDesc.text().trim();
-   
-       // Final response
-       res.status(200).json({
-         id,
-         name: info['Player Name'] || '',
-         position,
-         height,
-         age,
-         foot,
-         team_name: teamName,
-         league,
-         nationality,
-         region,
-         playing_style: playingStyle,
-         stats,
-         info,
-         skills,
-         player_skills: skills,
-         ai_playing_styles: aiStyles,
-         suggested_points: suggestedPoints,
-         description
-       });
-   
-     } catch (err) {
-       console.error('API Error:', err.message);
-       res.status(500).json({ error: 'Failed to fetch player data', details: err.message });
-     }
-   }
+// src/pages/api/player/[id].js
+const apicache = require('apicache');
+const { BASE_URL, fetchHtml } = require('./_utils');
+
+let cache = apicache.middleware('5 minutes');
+
+export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method Not Allowed', message: `Only GET requests are allowed for /api/player/:id. Received: ${req.method}` });
+  }
+
+  const cached = cache(req, res);
+  if (cached) {
+    return;
+  }
+
+  try {
+    const { id } = req.query; // Next.js da dinamik route parametrlari req.query orqali keladi
+    const { mode } = req.query; // 'max_level' or empty
+    
+    if (!id) {
+      return res.status(400).json({ error: "Player ID is required." });
+    }
+
+    const url = `${BASE_URL}?id=${id}${mode === 'max_level' ? '&mode=max_level' : ''}`;
+    const $ = await fetchHtml(url);
+
+    const result = {
+      id,
+      name: '',
+      info: {},
+      stats: {},
+      skills: [],
+      playing_styles: [],
+      suggested_points: {}
+    };
+
+    // O'yinchi nomi (H1 tegidan olinadi)
+    result.name = $('h1').first().text().trim();
+    if (result.name.includes(' - ')) {
+        result.name = result.name.split(' - ')[0].trim();
+    }
+
+    // Asosiy ma'lumotlar va stats (table.player ichidan)
+    $('table.player tr').each((i, el) => {
+      const th = $(el).find('th').text().trim().replace(/:/g, '').toLowerCase();
+      let value = $(el).find('td').text().trim();
+
+      if (!th || !value) return; // Bo'sh qatorlarni o'tkazib yuborish
+
+      // Ma'lumotlarni turiga qarab ajratish
+      if (th === 'player name') {
+        // Nomi yuqorida olindi, bu qatorni o'tkazamiz
+      } else if (th === 'position') {
+        result.info.position = value;
+      } else if (th === 'playing styles') {
+        // Playing styles'ni HTML ichidan ajratib olish (br teglariga qarab)
+        result.playing_styles = $(el).find('td').html().split('<br>').map(s => $(s).text().trim()).filter(s => s);
+      } else if (th === 'player skills') {
+        // Skills'ni HTML ichidan ajratib olish
+        result.skills = $(el).find('td').html().split('<br>').map(s => $(s).text().trim()).filter(s => s);
+      } else if (value.match(/^\d+$/) && th !== 'id') { // Raqamli qiymatlar stats bo'lishi mumkin
+        result.stats[th.replace(/\s+/g, '_')] = parseInt(value, 10);
+      } else {
+        result.info[th.replace(/\s+/g, '_')] = value;
+      }
+    });
+
+    // Suggested Points (Tahminiy rivojlantirish)
+    // Bu qism sayt strukturasi o'zgarishiga juda sezgir!
+    // "Suggested points allocation" yozuvi bilan boshlanadigan sectionni topamiz.
+    const suggestedPointsSection = $('b:contains("Suggested points allocation")').closest('div');
+    if (suggestedPointsSection.length > 0) {
+        suggestedPointsSection.find('table tr').each((i, el) => {
+            const cells = $(el).find('td');
+            if (cells.length === 2) {
+                const category = cells.eq(0).text().trim().replace(':', '');
+                const points = parseInt(cells.eq(1).text().trim(), 10);
+                if (category && !isNaN(points)) {
+                    result.suggested_points[category.replace(/\s+/g, '_').toLowerCase()] = points;
+                }
+            }
+        });
+    }
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error(`ERROR fetching player details for ID ${req.query.id}:`, err);
+    res.status(500).json({ error: "Failed to fetch player details", details: err.message });
+  }
+}

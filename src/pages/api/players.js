@@ -1,86 +1,60 @@
-// pages/api/players.js
+// src/pages/api/players.js
+const apicache = require('apicache');
+const { BASE_URL, fetchHtml } = require('./_utils');
 
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-
-const setHeaders = (res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Content-Type', 'application/json');
-};
+let cache = apicache.middleware('5 minutes');
 
 export default async function handler(req, res) {
-  setHeaders(res);
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method Not Allowed', message: `Only GET requests are allowed for /api/players. Received: ${req.method}` });
+  }
 
-  // Query parametrlarni olish: page, url (kategoriya url'i), va boshqa filtrlar
-  const { page = 1, url: customUrl, ...filters } = req.query; 
-
-  const baseUrl = 'https://pesdb.net/efootball/';
-  let targetUrl = customUrl || baseUrl;
+  const cached = cache(req, res);
+  if (cached) {
+    return;
+  }
 
   try {
-    const uri = new URL(targetUrl);
-    // Mavjud query parametrlarni olish
-    const queryParams = new URLSearchParams(uri.search);
+    const { page = 1, url, ...filters } = req.query;
+    let targetUrl = url || BASE_URL; // Agar maxsus URL berilmagan bo'lsa, asosiy URL'ni ishlatamiz.
+    
+    // Filterlarni URL parametrlariga aylantiramiz
+    const queryParams = { ...filters };
+    if (page > 1) queryParams.page = page;
 
-    // Yangi/mavjud parametrlarni qo'shish/o'zgartirish
-    queryParams.set('page', page);
-    // Boshqa filtrlar uchun:
-    Object.keys(filters).forEach(key => {
-        queryParams.set(key, filters[key]);
-    });
-
-    // Final URL'ni yaratish
-    targetUrl = uri.origin + uri.pathname + '?' + queryParams.toString();
-
-    const { data: html } = await axios.get(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      timeout: 15000,
-    });
-
-    const $ = cheerio.load(html);
+    // fetchHtml funksiyasiga yuboriladigan URL va parametrlar
+    const $ = await fetchHtml(targetUrl, Object.keys(queryParams).length > 0 ? queryParams : {});
     const players = [];
 
-    // O'yinchilar ma'lumotlari joylashgan jadval qatorlarini qidirish
-    $('tr').each((i, row) => {
-      let name, id, club, nationality;
-      // Har bir qatordagi 'a' teglarni qidirish
-      $(row).find('a').each((j, linkEl) => {
-        const href = $(linkEl).attr('href') || '';
-        const text = $(linkEl).text().trim();
+    // O'yinchilar jadvalidagi har bir qatorni (headerdan tashqari) ajratib olish
+    $('table.players tr').each((i, el) => {
+      if (i === 0) return; // Header qatorini o'tkazib yuborish
+      const tds = $(el).find('td');
+      if (tds.length === 0) return; // Bo'sh qatorlarni o'tkazib yuborish
 
-        if (href.includes('id=')) {
-          // O'yinchi detali URL'i bo'lsa
-          name = text;
-          // URL'dan 'id' parametrini ajratib olish
-          const idMatch = href.match(/id=(\d+)/); 
-          if (idMatch) id = idMatch[1];
-        } else if (href.includes('club_team=')) {
-          club = text;
-        } else if (href.includes('nationality=')) {
-          nationality = text;
-        }
-      });
+      const link = tds.eq(1).find('a');
+      const href = link.attr('href') || '';
 
-      if (id && name) {
+      // O'yinchi ID'sini href atributidan ajratib olish
+      const idMatch = href.match(/id=(\d+)/);
+      const id = idMatch ? idMatch[1] : null;
+
+      if (id) {
         players.push({
           id: id,
-          name: name,
-          club: club || 'Free Agent',
-          nationality: nationality || 'Unknown',
+          name: link.text().trim(),
+          position: tds.eq(0).text().trim(),
+          team: tds.eq(2).text().trim(), 
+          rating: $(el).find('td').last().text().trim(), // Odatda reyting oxirgi ustunda joylashgan
+          club: $(el).find('a[href*="club_team"]').text().trim() || "Free Agent", // Klub nomi
+          nationality: $(el).find('a[href*="nationality"]').text().trim() || "Unknown", // Millat
+          playing_style: tds.eq(3).text().trim() // O'yin uslubi
         });
       }
     });
-
     res.status(200).json(players);
-
-  } catch (error) {
-    console.error('Scraping error in players:', error);
-    res.status(500).json({ error: 'Failed to fetch players', details: error.message });
+  } catch (err) {
+    console.error("ERROR fetching players list:", err);
+    res.status(500).json({ error: "Failed to fetch players list", details: err.message });
   }
 }
