@@ -1,130 +1,262 @@
-// src/pages/index.js (Misol uchun)
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import Header from '@/components/Header';
+import CategoryChips from '@/components/CategoryChips';
+import FeaturedFilter from '@/components/FeaturedFilter';
+import PlayerTable from '@/components/PlayerTable';
+import PlayerModal from '@/components/PlayerModal';
 
 export default function Home() {
+  // Data states
   const [categories, setCategories] = useState([]);
+  const [featuredOptions, setFeaturedOptions] = useState([]);
   const [players, setPlayers] = useState([]);
+
+  // Loading states
   const [loadingCategories, setLoadingCategories] = useState(true);
+  const [loadingFeatured, setLoadingFeatured] = useState(true);
   const [loadingPlayers, setLoadingPlayers] = useState(true);
+
+  // Error states
   const [errorCategories, setErrorCategories] = useState(null);
   const [errorPlayers, setErrorPlayers] = useState(null);
 
-  // Kategoriyalarni yuklash
-  useEffect(() => {
-    async function fetchCategories() {
-      try {
-        const response = await fetch('/api/categories');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        // Agar API "message: 'No categories found'" bilan bo'sh massiv qaytarsa
-        if (data.categories) {
-            setCategories(data.categories);
-        } else {
-            setCategories(data); // To'g'ridan-to'g'ri massiv qaytarsa
-        }
+  // Filter states
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [featuredValue, setFeaturedValue] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
-      } catch (error) {
-        console.error("Failed to fetch categories:", error);
-        setErrorCategories(error.message);
-      } finally {
-        setLoadingCategories(false);
-      }
-    }
-    fetchCategories();
+  // Player detail modal
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+
+  // Page state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Fetch categories
+  useEffect(() => {
+    fetch('/api/categories')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setCategories(data.categories || data || []);
+      })
+      .catch((err) => setErrorCategories(err.message))
+      .finally(() => setLoadingCategories(false));
   }, []);
 
-  // O'yinchilarni yuklash
+  // Fetch featured options
   useEffect(() => {
-    async function fetchPlayers() {
-      try {
-        const response = await fetch('/api/players');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        // Agar API "message: 'No players found'" bilan bo'sh massiv qaytarsa
-        if (data.players) {
-            setPlayers(data.players);
-        } else {
-            setPlayers(data); // To'g'ridan-to'g'ri massiv qaytarsa
-        }
-      } catch (error) {
-        console.error("Failed to fetch players:", error);
-        setErrorPlayers(error.message);
-      } finally {
-        setLoadingPlayers(false);
-      }
-    }
+    fetch('/api/featured-options')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => setFeaturedOptions(data || []))
+      .catch(() => {})
+      .finally(() => setLoadingFeatured(false));
+  }, []);
+
+  // Fetch players
+  const fetchPlayers = useCallback(() => {
+    setLoadingPlayers(true);
+    setErrorPlayers(null);
+
+    const params = new URLSearchParams();
+    if (currentPage > 1) params.set('page', currentPage);
+    if (featuredValue) params.set('featured', featuredValue);
+    if (activeCategory) params.set('url', `https://pesdb.net/efootball/${activeCategory}`);
+
+    const queryString = params.toString();
+    const url = `/api/players${queryString ? `?${queryString}` : ''}`;
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setPlayers(data.players || data || []);
+      })
+      .catch((err) => setErrorPlayers(err.message))
+      .finally(() => setLoadingPlayers(false));
+  }, [currentPage, featuredValue, activeCategory]);
+
+  useEffect(() => {
     fetchPlayers();
-  }, []);
+  }, [fetchPlayers]);
+
+  // Category change handler
+  const handleCategoryChange = (href) => {
+    setActiveCategory(href);
+    setCurrentPage(1);
+  };
+
+  // Featured change handler
+  const handleFeaturedChange = (val) => {
+    setFeaturedValue(val);
+    setCurrentPage(1);
+  };
+
+  // Filtered players by local search
+  const filteredPlayers = searchTerm
+    ? players.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.team?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.club?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.nationality?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : players;
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>Ma'lumotlar ro'yxati</h1>
+    <div style={{ minHeight: '100vh', background: 'var(--background)' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px 24px 60px' }}>
+        <Header playerCount={filteredPlayers.length} />
 
-      <section>
-        <h2>Kategoriyalar</h2>
-        {loadingCategories && <p>Kategoriyalar yuklanmoqda...</p>}
-        {errorCategories && <p style={{ color: 'red' }}>Kategoriyalarni yuklashda xato yuz berdi: {errorCategories}</p>}
-        {!loadingCategories && categories.length === 0 && <p>Kategoriyalar topilmadi.</p>}
-        {!loadingCategories && categories.length > 0 && (
-          <ul>
-            {categories.map((category, index) => (
-              <li key={index}>
-                <a href={category.href} target="_blank" rel="noopener noreferrer">
-                  {category.name}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        {/* Filters section */}
+        <div
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+          }}
+        >
+          {/* Search and featured filter row */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '12px',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+            }}
+          >
+            {/* Search input */}
+            <div style={{ flex: '1 1 280px', position: 'relative' }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--muted-foreground)',
+                  fontSize: '14px',
+                  pointerEvents: 'none',
+                }}
+              >
+                {'::'}
+              </span>
+              <input
+                type="text"
+                placeholder="O'yinchi, jamoa, klub qidirish..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px 10px 36px',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--background)',
+                  color: 'var(--foreground)',
+                  fontSize: '14px',
+                  outline: 'none',
+                }}
+              />
+            </div>
+            <FeaturedFilter
+              options={featuredOptions}
+              loading={loadingFeatured}
+              value={featuredValue}
+              onChange={handleFeaturedChange}
+            />
+          </div>
 
-      <section style={{ marginTop: '40px' }}>
-        <h2>O'yinchilar ro'yxati</h2>
-        {loadingPlayers && <p>O'yinchilar yuklanmoqda...</p>}
-        {errorPlayers && <p style={{ color: 'red' }}>O'yinchilarni yuklashda xato yuz berdi: {errorPlayers}</p>}
-        {!loadingPlayers && players.length === 0 && <p>O'yinchilar topilmadi.</p>}
+          {/* Category chips */}
+          <CategoryChips
+            categories={categories}
+            loading={loadingCategories}
+            error={errorCategories}
+            activeCategory={activeCategory}
+            onSelect={handleCategoryChange}
+          />
+        </div>
+
+        {/* Player table */}
+        <PlayerTable
+          players={filteredPlayers}
+          loading={loadingPlayers}
+          error={errorPlayers}
+          onPlayerClick={(id) => setSelectedPlayerId(id)}
+        />
+
+        {/* Pagination */}
         {!loadingPlayers && players.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f2f2f2' }}>
-                <th style={tableHeaderStyle}>Ism</th>
-                <th style={tableHeaderStyle}>Jamoa</th>
-                <th style={tableHeaderStyle}>Reyting</th>
-                <th style={tableHeaderStyle}>Klub</th>
-                <th style={tableHeaderStyle}>Millat</th>
-                <th style={tableHeaderStyle}>O'yin uslubi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {players.map((player, index) => (
-                <tr key={index} style={index % 2 === 0 ? {} : { backgroundColor: '#f9f9f9' }}>
-                  <td style={tableCellStyle}>{player.name}</td>
-                  <td style={tableCellStyle}>{player.team}</td>
-                  <td style={tableCellStyle}>{player.rating}</td>
-                  <td style={tableCellStyle}>{player.club}</td>
-                  <td style={tableCellStyle}>{player.nationality}</td>
-                  <td style={tableCellStyle}>{player.playing_style}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '8px',
+              marginTop: '20px',
+              alignItems: 'center',
+            }}
+          >
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              style={{
+                padding: '8px 20px',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)',
+                background: currentPage <= 1 ? 'var(--secondary)' : 'var(--card)',
+                color: currentPage <= 1 ? 'var(--muted-foreground)' : 'var(--foreground)',
+                cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+              }}
+            >
+              Oldingi
+            </button>
+            <span
+              style={{
+                padding: '8px 16px',
+                background: 'var(--primary)',
+                color: 'var(--primary-foreground)',
+                borderRadius: 'var(--radius)',
+                fontWeight: 700,
+                fontSize: '13px',
+                minWidth: '40px',
+                textAlign: 'center',
+              }}
+            >
+              {currentPage}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => p + 1)}
+              style={{
+                padding: '8px 20px',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--border)',
+                background: 'var(--card)',
+                color: 'var(--foreground)',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+              }}
+            >
+              Keyingi
+            </button>
+          </div>
         )}
-      </section>
+      </div>
+
+      {/* Player detail modal */}
+      <PlayerModal
+        playerId={selectedPlayerId}
+        onClose={() => setSelectedPlayerId(null)}
+      />
     </div>
   );
 }
-
-const tableHeaderStyle = {
-    border: '1px solid #ddd',
-    padding: '8px',
-    textAlign: 'left',
-};
-
-const tableCellStyle = {
-    border: '1px solid #ddd',
-    padding: '8px',
-};
