@@ -8,9 +8,9 @@ const jar = new CookieJar();
 const client = wrapper(axios.create({ jar }));
 
 // Sozlamalar
-const BASE_URL = 'https://pesdb.net/efootball/';
+const BASE_URL = 'https://www.pesmaster.com/efootball-2024/';
 // USER_AGENT'ni tez-tez o'zgartirish scrapingni barqaror qilishga yordam berishi mumkin.
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 
 /**
  * Berilgan URL'dan HTML sahifasini olib, Cheerio obyektini qaytaradi.
